@@ -1,5 +1,5 @@
 # smtp-log-processor
-Processing logs given by Postfix and sending to Postgresql
+Processing logs given by Postfix, aggregate it to be used in logstash
 
 # Details
 - Python 3.10.13 is used when developing this. However, older or newer version should still be possible to use.
