@@ -1,16 +1,16 @@
 from pygtail import Pygtail
-import json
-import re
+import json, re, os, time
 from typing import TextIO
-import time
+from dotenv import load_dotenv
 
-LOGFILE_PATH = "sample_mail.log" # source log
-CONSOLIDATED_LOG_PATH = "./logstash_ingest_data/consolidated_log.log" # destination consolidated log
+load_dotenv()
+
+LOGFILE_INPUT_PATH = os.getenv("LOGFILE_INPUT_PATH") # source log
+PYGTAIL_OFFSET_PATH = os.getenv("PYGTAIL_OFFSET_PATH")
+CONSOLIDATED_LOG_PATH = os.getenv("CONSOLIDATED_LOG_PATH") # destination consolidated log
 
 # [TODO] must do rotation for the consolidated.log
 # [TODO] make it robust (for restart)
-# [TODO] sender
-# [TODO] timestamp for ok
 
 # CHAT GPT for parsing. Please check again
 log_patterns = [
@@ -73,10 +73,12 @@ def process_status(postfix_id, content):
     to_address = content["to"]
     relay = content["relay"]
     status_message = content["status_message"]
+    timestamp = content["timestamp"]
     DB_EXAMPLE[postfix_id]["status"] = status
     DB_EXAMPLE[postfix_id]["to"] = to_address
     DB_EXAMPLE[postfix_id]["relay"] = relay
     DB_EXAMPLE[postfix_id]["status_message"] = status_message
+    DB_EXAMPLE[postfix_id]["timestamp"] = timestamp
 
 def process_queue_message(postfix_id, content):
     from_address = content["from"]
@@ -94,17 +96,20 @@ def process_log_line(line:str, file_handler: TextIO):
         return
     
     postfix_id = parsed_log["postfix_id"]
+    postfix_hostname = parsed_log["host"]
     
     if postfix_id not in DB_EXAMPLE:
         DB_EXAMPLE[postfix_id] = {
             "postfix_id": postfix_id,
+            "postfix_hostname": postfix_hostname,
             "subject": "",
             "message_id": "",
             "status": "",
             "from": "",
             "to": "",
             "relay": "",
-            "size": 0
+            "size": 0,
+            "timestamp": ""
         }
     if log_type == "header_subject":
         process_subject(postfix_id, parsed_log)
@@ -123,15 +128,9 @@ def process_log_line(line:str, file_handler: TextIO):
 def on_update_offset():
     pass
 
-if __name__ == "__main__":
-    # with open(CONSOLIDATED_LOG_PATH, "a", buffering=1) as consolidated_log_handler:
-    #     with open(LOGFILE_PATH, "r") as log_source_handler:
-    #         for line in log_source_handler:
-    #             process_log_line(line, consolidated_log_handler)
-    # print(json.dumps(DB_EXAMPLE, indent=2))
-    
+if __name__ == "__main__":    
     with open(CONSOLIDATED_LOG_PATH, "a", buffering=1) as consolidated_log_handler:
         while True:
-            for line in Pygtail(LOGFILE_PATH):
+            for line in Pygtail(filename=LOGFILE_INPUT_PATH, offset_file=PYGTAIL_OFFSET_PATH):
                 process_log_line(line, consolidated_log_handler)
             time.sleep(1)
