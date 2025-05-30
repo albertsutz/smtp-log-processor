@@ -1,8 +1,16 @@
 from pygtail import Pygtail
 import json
 import re
+from typing import TextIO
+import time
 
-LOGFILE_PATH = "sample_mail.log"
+LOGFILE_PATH = "sample_mail.log" # source log
+CONSOLIDATED_LOG_PATH = "./logstash_ingest_data/consolidated_log.log" # destination consolidated log
+
+# [TODO] must do rotation for the consolidated.log
+# [TODO] make it robust (for restart)
+# [TODO] sender
+# [TODO] timestamp for ok
 
 # CHAT GPT for parsing. Please check again
 log_patterns = [
@@ -54,38 +62,76 @@ DB_EXAMPLE = {}
 # the next 4 functions are necessary to handle processing and giving to DB
 def process_subject(postfix_id, content):
     subject = content['subject']
-    # print(f"processing subject: {subject}")
     DB_EXAMPLE[postfix_id]["subject"] = subject
 
 def process_message_id(postfix_id, content):
     message_id = content['message_id']
-    # print(f"processing message_id: {message_id}")
     DB_EXAMPLE[postfix_id]["message_id"] = message_id
 
 def process_status(postfix_id, content):
     status = content['status']
-    # print(f"processing status: {status}")
-    DB_EXAMPLE[postfix_id]["subject"] = status
+    to_address = content["to"]
+    relay = content["relay"]
+    status_message = content["status_message"]
+    DB_EXAMPLE[postfix_id]["status"] = status
+    DB_EXAMPLE[postfix_id]["to"] = to_address
+    DB_EXAMPLE[postfix_id]["relay"] = relay
+    DB_EXAMPLE[postfix_id]["status_message"] = status_message
 
-def process_log_line(line:str):
+def process_queue_message(postfix_id, content):
+    from_address = content["from"]
+    email_size = content["size"]
+    DB_EXAMPLE[postfix_id]["from"] = from_address
+    DB_EXAMPLE[postfix_id]["size"] = email_size
+
+def write_log(file_handler: TextIO, content):
+    file_handler.write(json.dumps(content) + "\n")
+
+def process_log_line(line:str, file_handler: TextIO):
     parsed_log = parse_log_line(line)
+    log_type = parsed_log["type"]
+    if log_type in ["client_connection", "message_removed"]:
+        return
+    
     postfix_id = parsed_log["postfix_id"]
     
     if postfix_id not in DB_EXAMPLE:
         DB_EXAMPLE[postfix_id] = {
             "postfix_id": postfix_id,
             "subject": "",
-            "message_id": ""
+            "message_id": "",
+            "status": "",
+            "from": "",
+            "to": "",
+            "relay": "",
+            "size": 0
         }
-    if parsed_log["type"] == "header_subject":
+    if log_type == "header_subject":
         process_subject(postfix_id, parsed_log)
-    elif parsed_log["type"] == "message_id":
+    elif log_type == "message_id":
         process_message_id(postfix_id, parsed_log)
-    elif parsed_log["type"] == "delivery_status":
+    elif log_type == "queue_message":
+        process_queue_message(postfix_id, parsed_log)
+    elif log_type == "delivery_status":
         process_status(postfix_id, parsed_log)
+        write_log(file_handler, DB_EXAMPLE[postfix_id])
+        DB_EXAMPLE.pop(postfix_id)
+    
+
+# this function is called when pygtail finished writing to the offset file
+# this should so something along the lines of flushing to the database
+def on_update_offset():
+    pass
 
 if __name__ == "__main__":
-    with open(LOGFILE_PATH, "r") as f:
-        for line in f:
-            process_log_line(line)
-    print(json.dumps(DB_EXAMPLE, indent=2))
+    # with open(CONSOLIDATED_LOG_PATH, "a", buffering=1) as consolidated_log_handler:
+    #     with open(LOGFILE_PATH, "r") as log_source_handler:
+    #         for line in log_source_handler:
+    #             process_log_line(line, consolidated_log_handler)
+    # print(json.dumps(DB_EXAMPLE, indent=2))
+    
+    with open(CONSOLIDATED_LOG_PATH, "a", buffering=1) as consolidated_log_handler:
+        while True:
+            for line in Pygtail(LOGFILE_PATH):
+                process_log_line(line, consolidated_log_handler)
+            time.sleep(1)
