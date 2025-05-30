@@ -1,15 +1,10 @@
 from pygtail import Pygtail
-import json, re, os, time
+import json, re, os, time, logging
 from typing import TextIO
 from dotenv import load_dotenv
+from logging.handlers import RotatingFileHandler
 
-load_dotenv()
 
-LOGFILE_INPUT_PATH = os.getenv("LOGFILE_INPUT_PATH") # source log
-PYGTAIL_OFFSET_PATH = os.getenv("PYGTAIL_OFFSET_PATH")
-CONSOLIDATED_LOG_PATH = os.getenv("CONSOLIDATED_LOG_PATH") # destination consolidated log
-
-# [TODO] must do rotation for the consolidated.log
 # [TODO] make it robust (for restart)
 
 # CHAT GPT for parsing. Please check again
@@ -86,10 +81,12 @@ def process_queue_message(postfix_id, content):
     DB_EXAMPLE[postfix_id]["from"] = from_address
     DB_EXAMPLE[postfix_id]["size"] = email_size
 
-def write_log(file_handler: TextIO, content):
-    file_handler.write(json.dumps(content) + "\n")
+def write_log(output_logger: logging.Logger, content):
+    output_logger.info(json.dumps(content))
+    # file_handler.write(json.dumps(content) + "\n")
+    
 
-def process_log_line(line:str, file_handler: TextIO):
+def process_log_line(line:str, output_logger: logging.Logger):
     parsed_log = parse_log_line(line)
     log_type = parsed_log["type"]
     if log_type in ["client_connection", "message_removed"]:
@@ -119,7 +116,7 @@ def process_log_line(line:str, file_handler: TextIO):
         process_queue_message(postfix_id, parsed_log)
     elif log_type == "delivery_status":
         process_status(postfix_id, parsed_log)
-        write_log(file_handler, DB_EXAMPLE[postfix_id])
+        write_log(output_logger, DB_EXAMPLE[postfix_id])
         DB_EXAMPLE.pop(postfix_id)
     
 
@@ -128,9 +125,25 @@ def process_log_line(line:str, file_handler: TextIO):
 def on_update_offset():
     pass
 
-if __name__ == "__main__":    
+if __name__ == "__main__":  
+    # load all the environment variables  
+    load_dotenv()
+    LOGFILE_INPUT_PATH = os.getenv("LOGFILE_INPUT_PATH") # source log
+    PYGTAIL_OFFSET_PATH = os.getenv("PYGTAIL_OFFSET_PATH")
+    CONSOLIDATED_LOG_PATH = os.getenv("CONSOLIDATED_LOG_PATH") # destination consolidated log
+    CONSOLIDATED_LOG_SIZE = int(os.getenv("CONSOLIDATED_LOG_SIZE"))
+    CONSOLIDATED_LOG_BACKUP_COUNT = int(os.getenv("CONSOLIDATED_LOG_BACKUP_COUNT"))
+
+    # file handler
+    handler = RotatingFileHandler(filename=CONSOLIDATED_LOG_PATH, maxBytes=CONSOLIDATED_LOG_SIZE, backupCount=CONSOLIDATED_LOG_BACKUP_COUNT)
+
+    # log handler
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    logger.addHandler(handler)
+
     with open(CONSOLIDATED_LOG_PATH, "a", buffering=1) as consolidated_log_handler:
         while True:
             for line in Pygtail(filename=LOGFILE_INPUT_PATH, offset_file=PYGTAIL_OFFSET_PATH):
-                process_log_line(line, consolidated_log_handler)
+                process_log_line(line, logger)
             time.sleep(1)
