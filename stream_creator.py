@@ -3,7 +3,7 @@ import random
 import time
 from typing import TextIO, List
 
-FILE_PATH = "sample_mail.log"
+FILE_PATH = "input/sample_mail.log"
 
 POSTFIX_CHAR = ["A", "B", "C", "D", "E", "F", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
 SAMPLE_ENTRIES = [
@@ -37,7 +37,7 @@ def gen_random_postfix_id() -> str:
     return answer
 
 def gen_log(timestamp, process, msg_id, content) -> str:
-    return f"{timestamp} mailserver postfix/{process}[{random.randint(1000,9999)}]: {msg_id}: {content}"
+    return f"{timestamp} mailserver1 postfix/{process}[{random.randint(1000,9999)}]: {msg_id}: {content}"
 
 def generate_log_from_entry(entry) -> List[str]:
     ts = datetime.now().strftime('%b %d %H:%M:%S')
